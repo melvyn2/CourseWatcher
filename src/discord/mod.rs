@@ -760,11 +760,18 @@ impl Handler {
                 let embed = CreateEmbed::new()
                     .color(Colour::RED)
                     .footer(CreateEmbedFooter::new("").icon_url(MARTLET_PNG_URL))
-                    .author(CreateEmbedAuthor::new(format!(
-                        "{} {}",
-                        env!("CARGO_BIN_NAME"),
-                        env!("CARGO_PKG_VERSION")
-                    )))
+                    .author(
+                        CreateEmbedAuthor::new(format!(
+                            "{} {}",
+                            env!("CARGO_BIN_NAME"),
+                            env!("CARGO_PKG_VERSION")
+                        ))
+                        .url("https://github.com/melvyn2/CourseWatcher"),
+                    )
+                    .description(
+                        "This bot is free, open-source software licensed under \
+                        [AGPLv3](https://www.gnu.org/licenses/agpl-3.0.txt).",
+                    )
                     .fields([
                         (
                             "Lat update",
