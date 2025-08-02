@@ -3,11 +3,10 @@ use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
 
 use anyhow::Context;
-use serde::{Deserialize, Serialize};
 
-use crate::scraper::ScraperError;
+use crate::minerva::MinervaScraperError;
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 #[repr(u8)]
 pub enum Select {
     Open = 0,
@@ -18,7 +17,7 @@ pub enum Select {
 }
 
 impl TryFrom<u8> for Select {
-    type Error = ScraperError;
+    type Error = MinervaScraperError;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
@@ -35,7 +34,7 @@ impl TryFrom<u8> for Select {
 }
 
 impl TryFrom<&str> for Select {
-    type Error = ScraperError;
+    type Error = MinervaScraperError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         match value {
@@ -44,14 +43,14 @@ impl TryFrom<&str> for Select {
             "" => Ok(Select::Empty),
             "NR" => Ok(Select::NotAvailable),
             "SR" => Ok(Select::StudentRestriction),
-            v => Err(ScraperError::ParseError(format!(
+            v => Err(MinervaScraperError::ParseError(format!(
                 "Unknown select contents: {v}",
             ))),
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 #[repr(u8)]
 pub enum Status {
     Active = 0,
@@ -61,7 +60,7 @@ pub enum Status {
 }
 
 impl TryFrom<u8> for Status {
-    type Error = ScraperError;
+    type Error = MinervaScraperError;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
@@ -87,7 +86,7 @@ impl Display for Status {
     }
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 #[repr(transparent)]
 pub struct Subject(pub [u8; 4]);
 impl Display for Subject {
@@ -108,7 +107,7 @@ impl TryFrom<&str> for Subject {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 #[repr(u8)]
 pub enum CourseNumber {
     Plain(u16),
@@ -127,7 +126,7 @@ impl Display for CourseNumber {
 }
 
 impl TryFrom<String> for CourseNumber {
-    type Error = ScraperError;
+    type Error = MinervaScraperError;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         match value.len() {
@@ -144,19 +143,6 @@ impl TryFrom<String> for CourseNumber {
         }
     }
 }
-
-// impl From<String> for CourseNumber {
-//     fn from(value: String) -> Self {
-//         match value.len() {
-//             3 if let Ok(num) = value.parse() => CourseNumber::Plain(num),
-//             // Length is already checked, force
-//             5 if let Ok(num) = value[..3].parse() => {
-//                 CourseNumber::Spanned(num, value.as_bytes()[3..].try_into().unwrap())
-//             }
-//             _ => CourseNumber::Other(value),
-//         }
-//     }
-// }
 
 impl Ord for CourseNumber {
     fn cmp(&self, other: &Self) -> Ordering {
@@ -184,7 +170,7 @@ impl PartialOrd for CourseNumber {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum SectionNumber {
     Plain(u16),
     Other(String),
@@ -200,11 +186,11 @@ impl Display for SectionNumber {
 }
 
 impl TryFrom<String> for SectionNumber {
-    type Error = ScraperError;
+    type Error = MinervaScraperError;
 
     fn try_from(section_s: String) -> Result<Self, Self::Error> {
         if section_s.is_empty() {
-            return Err(ScraperError::ParseError(
+            return Err(MinervaScraperError::ParseError(
                 "Unexpected empty section number".to_string(),
             ));
         }
@@ -232,7 +218,7 @@ impl PartialOrd for SectionNumber {
     }
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Milliunits(pub u16);
 impl Display for Milliunits {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -241,7 +227,7 @@ impl Display for Milliunits {
 }
 
 impl TryFrom<&str> for Milliunits {
-    type Error = ScraperError;
+    type Error = MinervaScraperError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         value
@@ -257,12 +243,14 @@ impl TryFrom<&str> for Milliunits {
                 }
             })
             .ok_or_else(|| {
-                ScraperError::ParseError(format!("Could not parse the credit-count cell: {value}"))
+                MinervaScraperError::ParseError(format!(
+                    "Could not parse the credit-count cell: {value}"
+                ))
             })
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Days(pub Option<[bool; 7]>);
 impl Display for Days {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -325,13 +313,11 @@ impl Display for Availability {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct SectionData {
     pub select: Select,
     pub crn: u32,
     pub subject: Subject,
-    // pub number: u16,
-    // pub span: Option<[u8; 2]>,
     pub number: CourseNumber,
     pub section: SectionNumber,
     pub sec_type: String,
@@ -351,12 +337,14 @@ pub struct SectionData {
     pub date: String,
     pub location: Option<String>,
     pub status: Status,
-    // term: u32,
     pub notes: Vec<String>,
 }
 
 impl SectionData {
-    fn parse_times_from_days_time(days_s: &str, time_s: &str) -> Result<Vec<String>, ScraperError> {
+    fn parse_times_from_days_time(
+        days_s: &str,
+        time_s: &str,
+    ) -> Result<Vec<String>, MinervaScraperError> {
         if days_s == "TBA" {
             Ok(vec![])
         } else {
@@ -374,14 +362,14 @@ impl SectionData {
                         'S' => "Saturday",
                         'U' => "Sunday",
                         o => {
-                            return Err(ScraperError::ParseError(format!(
+                            return Err(MinervaScraperError::ParseError(format!(
                                 "Unknown day abbreviation: '{o}'"
                             )));
                         }
                     };
                     Ok(format!("{day_name} {time}"))
                 })
-                .collect::<Result<Vec<String>, ScraperError>>()
+                .collect::<Result<Vec<String>, MinervaScraperError>>()
         }
     }
 
@@ -470,7 +458,7 @@ impl SectionData {
                     'U' => 6,
                     // _ => return Err(ScraperError::InvalidDay(c).into()),
                     o => {
-                        return Err(ScraperError::ParseError(format!(
+                        return Err(MinervaScraperError::ParseError(format!(
                             "Unknown day abbreviation: '{o}'"
                         ))
                         .into());
@@ -505,9 +493,10 @@ impl SectionData {
             "Temporarily closed" => Status::TemporarilyClosed,
             "Registration Not Required" => Status::RegistrationNotRequired,
             s => {
-                return Err(
-                    ScraperError::ParseError(format!("Unknown section status: '{s}'")).into(),
-                );
+                return Err(MinervaScraperError::ParseError(format!(
+                    "Unknown section status: '{s}'"
+                ))
+                .into());
             }
         };
 

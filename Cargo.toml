@@ -1,6 +1,6 @@
 [package]
 name = "coursewatcher"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 license = "AGPL-3"
 
@@ -10,12 +10,12 @@ log = "0.4"
 thiserror = "2.0"
 scraper = "0.23"
 reqwest  = { version = "0.12", features = ["rustls-tls", "cookies", "http2", "system-proxy","blocking"], default-features = false }
+roxmltree = "0.20"
 anyhow = "1.0"
 
 ## Database and entrypoint
-chrono = { version = "0.4", features = ["serde"] }
-serde = { version = "1.0", features = ["derive"] }
-rusqlite = { version = "0.37.0", features = ["chrono", "hooks", "bundled"] }
+chrono = { version = "0.4" }
+rusqlite = { version = "0.37.0", features = ["bundled"] }
 env_logger = "0.11"
 
 ## For discord bot side

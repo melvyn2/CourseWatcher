@@ -2,32 +2,38 @@
 #![feature(if_let_guard)]
 #![feature(option_zip)]
 
-use std::ops::Add;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::thread::sleep;
 use std::time::Duration;
 
 use anyhow::Context;
 
-use chrono::{TimeDelta, Utc};
+use chrono::Utc;
 
-use rusqlite::Connection;
+use reqwest::blocking::Client;
+
+use rusqlite::{Connection, Transaction};
 
 use tokio::sync::mpsc::UnboundedSender;
 
 mod db;
 mod discord;
 // mod models;
-mod parser;
-mod scraper;
+mod minerva;
+mod vsb;
 
 use crate::db::{
-    SectionRecord, bump_timestamp, demote_latest, insert_section, insert_terms_from_map,
-    last_update, latest_section_from_term_crn, open_or_init, subscriptions_to_section, term_ids,
-    term_name_from_id,
+    SectionRecord, bump_timestamp, demote_latest_by_crn, demote_latest_by_number, insert_section,
+    insert_terms_from_map, latest_section_from_term_crn, open_or_init, subscriptions_term_crn_all,
+    subscriptions_to_section, term_ids,
 };
 use crate::discord::discord_thread_entry;
-use crate::scraper::ScraperState;
+use crate::minerva::{
+    check_login, get_sections_for_term_subjs_fac, get_subj_fac_codes_for_term, get_term_map, login,
+    new_client,
+};
+use crate::vsb::vsb_get;
 
 pub struct SectionChangeMessage {
     channels: Vec<(u64, bool)>,
@@ -36,105 +42,154 @@ pub struct SectionChangeMessage {
     term_name: String,
 }
 
+fn process_section_update(
+    prev: Option<SectionRecord>,
+    next: SectionRecord,
+    trx: &Transaction,
+    sender: &UnboundedSender<SectionChangeMessage>,
+    term_map: &HashMap<u32, String>,
+) -> Result<bool, anyhow::Error> {
+    if next.is_equivalent(prev.as_ref()) {
+        bump_timestamp(trx, next.term, next.inner.crn, next.timestamp)?;
+        Ok(false)
+    } else {
+        demote_latest_by_crn(trx, next.term, next.inner.crn)?;
+        // This is necessary because sometimes a section's section number is reassigned
+        // And so we need to bump the previous record holding that section number out of the way
+        demote_latest_by_number(
+            trx,
+            next.term,
+            next.inner.subject,
+            next.inner.number.clone(),
+            next.inner.section.clone(),
+        )?;
+        insert_section(trx, &next, true).with_context(|| {
+            format!(
+                "Could not insert {} {}-{} ({}: {})",
+                next.inner.subject,
+                next.inner.number,
+                next.inner.section,
+                next.term,
+                next.inner.crn
+            )
+        })?;
+
+        let channels = subscriptions_to_section(trx, next.term, next.inner.crn)?;
+        // We do the real filtering on the listener thread, but because minerva fetches
+        // every course, do a quick subscriber check here to avoid sending so many
+        // unnecessary updates
+        if !channels.is_empty() {
+            log::debug!(
+                "Sending change for {}-{} for {channels:?}",
+                next.term,
+                next.inner.crn
+            );
+            sender.send(SectionChangeMessage {
+                term_name: term_map
+                    .get(&next.term)
+                    .cloned()
+                    .unwrap_or("Unknown Term".to_string()),
+                channels,
+                prev,
+                next,
+            })?
+        } else {
+            log::trace!(
+                "Ignoring change for {}-{}, no subscriptions",
+                next.term,
+                next.inner.crn
+            );
+        }
+        Ok(true)
+    }
+}
+
 fn insert_sections_for_term(
-    sc: &mut ScraperState,
-    req_delay: Duration,
+    cl: &Client,
     term: u32,
     conn: &mut Connection,
     sender: &UnboundedSender<SectionChangeMessage>,
+    term_map: &HashMap<u32, String>,
 ) -> Result<(), anyhow::Error> {
     log::debug!("Fetching sections for term {term}");
 
-    let (subj_ids, fac_ids) = sc.get_subj_fac_codes_for_term(term)?;
-    let term_name = term_name_from_id(conn, term)?
-        .ok_or(anyhow::anyhow!(format!("No terms entry found for {term}")))?;
+    let (subj_ids, _) = get_subj_fac_codes_for_term(cl, term)?;
 
-    for fac in fac_ids {
-        sleep(req_delay);
-        let now = Utc::now();
-        let sections =
-            sc.get_sections_for_term_subjs_fac(term, subj_ids.as_slice(), fac.as_str(), true)?;
+    let now = Utc::now();
+    let sections = get_sections_for_term_subjs_fac(cl, term, subj_ids.as_slice(), None, true)?;
 
-        let trx = conn.transaction()?;
-        let mut ctr = 0;
-        for sec in sections {
-            let prev = latest_section_from_term_crn(&trx, term, sec.crn)?;
-            let next = SectionRecord {
-                term,
-                timestamp: now,
-                inner: sec,
-            };
+    let trx = conn.transaction()?;
+    let mut ctr = 0;
+    for sec in sections {
+        let prev = latest_section_from_term_crn(&trx, term, sec.crn)?;
+        let next = SectionRecord {
+            term,
+            timestamp: now,
+            inner: sec,
+        };
 
-            if next.is_equivalent(prev.as_ref()) {
-                bump_timestamp(&trx, term, next.inner.crn, now)?;
-            } else {
-                demote_latest(&trx, term, next.inner.crn)?;
-                insert_section(&trx, &next, true).with_context(|| {
-                    format!(
-                        "Could not insert {} {}-{} ({}: {})",
-                        next.inner.subject,
-                        next.inner.number,
-                        next.inner.section,
-                        term,
-                        next.inner.crn
-                    )
-                })?;
-                ctr += 1;
-
-                let channels = subscriptions_to_section(&trx, term, next.inner.crn)?;
-                // Just do a simple subscriber check here, and do the rest of the
-                // filtering on the listener thread, to avoid duplicating too much logic
-                if !channels.is_empty() {
-                    log::debug!(
-                        "Sending change for {term}-{} for {channels:?}",
-                        next.inner.crn
-                    );
-                    sender.send(SectionChangeMessage {
-                        channels,
-                        prev,
-                        next,
-                        term_name: term_name.clone(),
-                    })?
-                } else {
-                    log::trace!(
-                        "Ignoring change for {term}-{}, no subscriptions",
-                        next.inner.crn
-                    );
-                }
-            }
-        }
-        trx.commit()?;
-        log::trace!("Committed {ctr} new section records");
+        ctr += process_section_update(prev, next, &trx, sender, term_map)? as u32;
     }
+    trx.commit()?;
+    log::trace!("Committed {ctr} new section records from Minerva");
     Ok(())
 }
 
 fn insert_all_sections(
-    sc: &mut ScraperState,
-    req_delay: Duration,
+    cl: &Client,
     conn: &mut Connection,
     sender: &UnboundedSender<SectionChangeMessage>,
+    term_map: &HashMap<u32, String>,
     minimum_term: u32,
 ) -> Result<(), anyhow::Error> {
     log::info!("Fetching all sections");
 
     let terms = term_ids(conn, minimum_term)?;
 
+    // TODO maybe parallelize?
+
     for term in terms {
-        insert_sections_for_term(sc, req_delay, term, conn, sender)?;
+        insert_sections_for_term(cl, term, conn, sender, term_map)?;
     }
     Ok(())
 }
 
 fn insert_terms(
-    sc: &mut ScraperState,
+    cl: &Client,
     conn: &mut Connection,
     include_ro: bool,
-) -> Result<(), anyhow::Error> {
+) -> Result<HashMap<u32, String>, anyhow::Error> {
     log::info!("Fetching available terms");
-    let map = sc.get_term_map(include_ro)?;
+    let map = get_term_map(cl, include_ro)?;
 
-    insert_terms_from_map(conn, map)?;
+    insert_terms_from_map(conn, &map)?;
+    Ok(map)
+}
+
+fn update_subbed_vsb(
+    cl: &Client,
+    conn: &mut Connection,
+    sender: &UnboundedSender<SectionChangeMessage>,
+    term_map: &HashMap<u32, String>,
+) -> Result<(), anyhow::Error> {
+    log::trace!("Fetching subscribed occupancy from VSB");
+
+    let terms_crns = subscriptions_term_crn_all(conn)?;
+
+    let results = vsb_get(cl, &terms_crns)?;
+    let trx = conn.transaction()?;
+    let mut ctr = 0;
+    for data in results {
+        let prev = match latest_section_from_term_crn(&trx, data.term, data.crn)? {
+            Some(d) => d,
+            None => continue,
+        };
+        let next = data.merge_with_full(prev.clone())?;
+
+        ctr += process_section_update(Some(prev), next, &trx, sender, term_map)? as u32;
+    }
+    trx.commit()?;
+    log::trace!("Committed {ctr} new section records from VSB");
     Ok(())
 }
 
@@ -171,7 +226,8 @@ fn init_logger() {
         logger_builder.format_timestamp(None);
     }
 
-    logger_builder.init();
+    // Parse env last so that it overrides
+    logger_builder.parse_default_env().init();
 }
 
 fn main() {
@@ -198,15 +254,14 @@ fn main() {
         std::env::remove_var("DISCORD_TOKEN");
     }
 
-    let cycle_min = std::env::var("CW_CYCLE_DELAY_MIN")
+    let cycle_sec = std::env::var("CW_CYCLE_DELAY_SEC")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(5);
-    let request_delay_sec = std::env::var("CW_REQUEST_DELAY_SEC")
+        .unwrap_or(10);
+    let full_fetch_cycles = std::env::var("CW_FULL_FETCH_EVERY")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(3);
-
+        .unwrap_or(360);
     let minimum_term = std::env::var("CW_MINIMUM_TERM")
         .ok()
         .and_then(|v| v.parse::<u32>().ok())
@@ -215,42 +270,36 @@ fn main() {
     let (mut conn, db_path) = open_db().unwrap();
 
     log::info!("Configuration and database loaded");
-    log::info!("Using {cycle_min} min cycle delay and {request_delay_sec} sec request delay",);
+    log::info!("Using {cycle_sec} sec cycle delay");
+    log::info!("Full minerva fetches every {full_fetch_cycles} cycles");
 
-    let mut scraper = ScraperState::new(None).unwrap();
-    scraper.login(&uid, &pin, None).unwrap();
+    let cl = new_client().unwrap();
+    login(&cl, &uid, &pin).unwrap();
 
     let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
     std::thread::spawn(|| discord_thread_entry(discord_token, db_path, receiver));
 
-    if std::env::var_os("CW_IMMEDIATE_FETCH").is_none() {
-        let last_update = last_update(&conn).unwrap().unwrap_or_default();
-        let neg_elapsed = last_update.signed_duration_since(Utc::now());
-        let remaining = neg_elapsed
-            .add(TimeDelta::minutes(cycle_min as i64))
-            .max(TimeDelta::zero());
-        sleep(remaining.to_std().unwrap())
-    }
+    let term_map = insert_terms(&cl, &mut conn, false).unwrap();
 
-    insert_terms(&mut scraper, &mut conn, false).unwrap();
-
+    let mut cycle_ctr = 0;
     loop {
-        if scraper.check_login().is_err() {
-            log::warn!("Session no longer valid, attempting login");
-            scraper.login(&uid, &pin, None).unwrap();
+        if cycle_ctr == 0 {
+            if check_login(&cl).is_err() {
+                log::warn!("Session no longer valid, attempting login");
+                login(&cl, &uid, &pin).unwrap();
+            }
+
+            insert_all_sections(&cl, &mut conn, &sender, &term_map, minimum_term).unwrap();
+        } else {
+            update_subbed_vsb(&cl, &mut conn, &sender, &term_map).unwrap();
         }
 
-        insert_all_sections(
-            &mut scraper,
-            Duration::from_secs(request_delay_sec),
-            &mut conn,
-            &sender,
-            minimum_term,
-        )
-        .unwrap();
+        if full_fetch_cycles != 0 {
+            cycle_ctr = (cycle_ctr + 1) % full_fetch_cycles
+        }
 
         log::trace!("Finished fetching, sleeping");
 
-        sleep(Duration::from_secs(cycle_min * 60));
+        sleep(Duration::from_secs(cycle_sec));
     }
 }

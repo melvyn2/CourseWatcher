@@ -34,7 +34,7 @@ use crate::db::{
     unsubscribe_channel_to_section_by_subj_number,
 };
 use crate::discord::listener::create_section_update_embed;
-use crate::parser::{CourseNumber, SectionNumber, Subject};
+use crate::minerva::parser::{CourseNumber, SectionNumber, Subject};
 
 const MARTLET_PNG_URL: &str = "https://cdn.discordapp.com/attachments/1385507660668993648/1390416756413304902/VeeM0cK.png?ex=68682e03&is=6866dc83&hm=4bb37f9ce82553d8613780b29e3e7f972e43d6f15728cd0d9e9457be7ec77183&";
 
@@ -809,7 +809,7 @@ pub async fn discord_thread_entry(
     discord_token: String,
     db_path: PathBuf,
     receiver: UnboundedReceiver<SectionChangeMessage>,
-) {
+) -> ! {
     // Panics in this thread kill the whole process
     let orig_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
@@ -832,4 +832,5 @@ pub async fn discord_thread_entry(
         .expect("Error creating client");
 
     client.start().await.unwrap();
+    panic!("Discord event handler ended unexpectedly")
 }

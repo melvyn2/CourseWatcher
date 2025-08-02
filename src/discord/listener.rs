@@ -8,7 +8,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use crate::SectionChangeMessage;
 use crate::db::SectionRecord;
 use crate::discord::MARTLET_PNG_URL;
-use crate::parser::Availability;
+use crate::minerva::parser::Availability;
 
 pub fn create_section_update_embed(
     prev: Option<SectionRecord>,
@@ -50,7 +50,39 @@ pub fn create_section_update_embed(
             desc.push_str("Section updated");
         }
 
-        // Order of importance for fields: Status, WL Rem, Rem, Instructor, Loc, then rest
+        // Order of importance for fields: Subj-Number-Section, SecType, Title,
+        // then Status, WL Rem, Rem, Instructor, Loc, then rest
+        if nd.subject != pd.subject {
+            builder = builder.field(
+                "Subject",
+                format!("{} (was {})", nd.subject, pd.subject),
+                false,
+            );
+        }
+        if nd.number != pd.number {
+            builder = builder.field(
+                "Number",
+                format!("{} (was {})", nd.number, pd.number),
+                false,
+            );
+        }
+        if nd.section != pd.section {
+            builder = builder.field(
+                "Section",
+                format!("{} (was {})", nd.section, pd.section),
+                false,
+            );
+        }
+        if nd.sec_type != pd.sec_type {
+            builder = builder.field(
+                "Section Type",
+                format!("{} (was {})", nd.sec_type, pd.sec_type),
+                false,
+            );
+        }
+        if nd.title != pd.title {
+            builder = builder.field("Title", format!("{} (was {})", nd.title, pd.title), false);
+        }
         if nd.status != pd.status {
             builder = builder.field(
                 "Status",

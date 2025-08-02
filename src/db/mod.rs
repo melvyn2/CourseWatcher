@@ -5,7 +5,7 @@ use rusqlite::fallible_iterator::FallibleIterator;
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSqlOutput, Type, Value, ValueRef};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Row, ToSql, Transaction, named_params};
 
-use crate::parser::{
+use crate::minerva::parser::{
     CourseNumber, Days, Milliunits, SectionData, SectionNumber, Select, Status, Subject,
 };
 use chrono::{DateTime, Utc};
@@ -172,6 +172,10 @@ impl CourseNumber {
         })
     }
 
+    /// If `nullable` is true, a non-spanned number will return sqlite Null
+    /// from this function, instead of the empty string. This can help with
+    /// constructing multi-result queries, but should NOT be used for INSERTs
+    /// or UPDATEs
     fn span_tosql(&self, nullable: bool) -> ToSqlOutput<'_> {
         ToSqlOutput::Borrowed(match (self, nullable) {
             (Self::Spanned(_, s), _) => ValueRef::Text(s),
@@ -277,6 +281,8 @@ impl ToSql for Status {
     }
 }
 
+// General operations
+
 pub fn open_or_init<P: AsRef<Path>>(path: P, init: bool) -> Result<Connection, rusqlite::Error> {
     let flags = if init {
         OpenFlags::SQLITE_OPEN_NO_MUTEX
@@ -352,6 +358,8 @@ pub fn db_stats(connection: &Connection) -> Result<DatabaseStats, rusqlite::Erro
     })
 }
 
+// Section Records
+
 pub fn latest_section_from_term_crn(
     trx: &Transaction,
     term: u32,
@@ -365,7 +373,11 @@ pub fn latest_section_from_term_crn(
     .optional()
 }
 
-pub fn demote_latest(trx: &Transaction, term: u32, crn: u32) -> Result<bool, rusqlite::Error> {
+pub fn demote_latest_by_crn(
+    trx: &Transaction,
+    term: u32,
+    crn: u32,
+) -> Result<bool, rusqlite::Error> {
     trx.prepare_cached(
         "UPDATE sections INDEXED BY latest_sections_crn SET latest = 0
             WHERE latest = 1 AND term = ?1 AND crn = ?2;",
@@ -378,6 +390,27 @@ pub fn demote_latest(trx: &Transaction, term: u32, crn: u32) -> Result<bool, rus
             Err(rusqlite::Error::StatementChangedRows(n))
         }
     })
+}
+
+pub fn demote_latest_by_number(
+    trx: &Transaction,
+    term: u32,
+    subject: Subject,
+    number: CourseNumber,
+    section: SectionNumber,
+) -> Result<bool, rusqlite::Error> {
+    trx.prepare_cached(
+        "UPDATE sections INDEXED BY latest_sections_crn SET latest = 0
+            WHERE latest = 1 AND term = ?1 AND subject = ?2 AND number = ?3 and span = ?4 and section = ?5;",
+    )?
+        .execute((term, subject, number.number_tosql(), number.span_tosql(false), section))
+        .and_then(|n| {
+            if n <= 1 {
+                Ok(n == 1)
+            } else {
+                Err(rusqlite::Error::StatementChangedRows(n))
+            }
+        })
 }
 
 pub fn bump_timestamp(
@@ -409,7 +442,7 @@ pub fn insert_section(
     }: &SectionRecord,
     is_latest: bool,
 ) -> Result<(), rusqlite::Error> {
-    let notes = sd.notes.join("\x31");
+    let notes = sd.notes.join("\x1E");
 
     trx.prepare_cached(
         "INSERT INTO sections VALUES
@@ -496,6 +529,8 @@ pub fn lookup_latest_sections_with_term_name(
     .collect()
 }
 
+// Subscriptions
+
 /// List of channels and whether they want all updates or only availabilities for a given course
 pub fn subscriptions_to_section(
     trx: &Transaction,
@@ -515,7 +550,7 @@ pub fn subscriptions_for_channel(
     channel: u64,
 ) -> Result<Vec<(u32, u32, bool)>, rusqlite::Error> {
     trx.prepare_cached("SELECT (term, crn, all_updates) FROM subscriptions WHERE channel = ?1;")?
-        .query((channel,))?
+        .query([channel])?
         .map(|row| {
             Ok((
                 row.get::<_, u32>(0)?,
@@ -524,6 +559,18 @@ pub fn subscriptions_for_channel(
             ))
         })
         .collect()
+}
+
+pub fn subscriptions_term_crn_all(
+    conn: &Connection,
+) -> Result<HashMap<u32, Vec<u32>>, rusqlite::Error> {
+    conn.prepare_cached("SELECT DISTINCT term, crn FROM subscriptions;")?
+        .query(())?
+        .map(|row| Ok((row.get::<_, u32>(0)?, row.get::<_, u32>(1)?)))
+        .fold(HashMap::new(), |mut map, (t, c)| {
+            map.entry(t).and_modify(|v| v.push(c)).or_insert(vec![c]);
+            Ok(map)
+        })
 }
 
 pub fn subscriptions_with_latest_description_for_channel(
@@ -650,6 +697,8 @@ pub fn unsubscribe_channel_from_all(
         .execute((channel,))
 }
 
+// Terms
+
 pub fn parse_term(conn: &Connection, term: &str) -> Result<Option<u32>, rusqlite::Error> {
     if let Ok(val) = term.parse::<u32>() {
         conn.prepare_cached("SELECT id FROM terms WHERE id = ?1;")?
@@ -662,12 +711,6 @@ pub fn parse_term(conn: &Connection, term: &str) -> Result<Option<u32>, rusqlite
     }
 }
 
-pub fn term_name_from_id(conn: &Connection, term: u32) -> Result<Option<String>, rusqlite::Error> {
-    conn.prepare_cached("SELECT name FROM terms WHERE id = ?1;")?
-        .query_one([term], |row| row.get(0))
-        .optional()
-}
-
 pub fn term_ids(conn: &Connection, minimum: u32) -> Result<Vec<u32>, rusqlite::Error> {
     conn.prepare("SELECT id FROM terms WHERE id >= ?1;")?
         .query([minimum])?
@@ -677,13 +720,13 @@ pub fn term_ids(conn: &Connection, minimum: u32) -> Result<Vec<u32>, rusqlite::E
 
 pub fn insert_terms_from_map(
     conn: &mut Connection,
-    term_map: HashMap<String, u32>,
+    term_map: &HashMap<u32, String>,
 ) -> Result<(), rusqlite::Error> {
     let trx = conn.transaction()?;
 
     {
         let mut statement = trx.prepare("INSERT OR REPLACE INTO terms VALUES (?1, ?2);")?;
-        for (name, id) in term_map {
+        for (id, name) in term_map {
             statement.execute((id, name))?;
         }
     }

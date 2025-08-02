@@ -332,7 +332,7 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
 name = "coursewatcher"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -340,9 +340,9 @@ dependencies = [
  "env_logger",
  "log",
  "reqwest 0.12.20",
+ "roxmltree",
  "rusqlite",
  "scraper",
- "serde",
  "serenity",
  "thiserror 2.0.12",
  "tokio",
@@ -1854,13 +1854,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "roxmltree"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
+
+[[package]]
 name = "rusqlite"
 version = "0.37.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "165ca6e57b20e1351573e3729b958bc62f0e48025386970b6e4d29e7a7e71f3f"
 dependencies = [
  "bitflags 2.9.1",
- "chrono",
  "fallible-iterator",
  "fallible-streaming-iterator",
  "hashlink",
