@@ -170,54 +170,6 @@ impl PartialOrd for CourseNumber {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub enum SectionNumber {
-    Plain(u16),
-    Other(String),
-}
-
-impl Display for SectionNumber {
-    fn fmt(&self, fmtr: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SectionNumber::Plain(n) => write!(fmtr, "{n:03}"),
-            SectionNumber::Other(s) => write!(fmtr, "{s}"),
-        }
-    }
-}
-
-impl TryFrom<String> for SectionNumber {
-    type Error = MinervaScraperError;
-
-    fn try_from(section_s: String) -> Result<Self, Self::Error> {
-        if section_s.is_empty() {
-            return Err(MinervaScraperError::ParseError(
-                "Unexpected empty section number".to_string(),
-            ));
-        }
-        Ok(match section_s.parse() {
-            Ok(n) => SectionNumber::Plain(n),
-            Err(_) => SectionNumber::Other(section_s),
-        })
-    }
-}
-
-impl Ord for SectionNumber {
-    fn cmp(&self, other: &Self) -> Ordering {
-        match (self, other) {
-            (SectionNumber::Plain(ln), SectionNumber::Plain(rn)) => ln.cmp(rn),
-            (SectionNumber::Other(lo), SectionNumber::Other(ro)) => lo.cmp(ro),
-            (SectionNumber::Other(_), SectionNumber::Plain(_)) => Ordering::Greater,
-            (SectionNumber::Plain(_), SectionNumber::Other(_)) => Ordering::Less,
-        }
-    }
-}
-
-impl PartialOrd for SectionNumber {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Milliunits(pub u16);
 impl Display for Milliunits {
@@ -319,7 +271,7 @@ pub struct SectionData {
     pub crn: u32,
     pub subject: Subject,
     pub number: CourseNumber,
-    pub section: SectionNumber,
+    pub section: String,
     pub sec_type: String,
     pub millicredits: Milliunits,
     pub title: String,

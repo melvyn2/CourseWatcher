@@ -34,7 +34,7 @@ use crate::db::{
     unsubscribe_channel_to_section_by_subj_number,
 };
 use crate::discord::listener::create_section_update_embed;
-use crate::minerva::parser::{CourseNumber, SectionNumber, Subject};
+use crate::minerva::parser::{CourseNumber, Subject};
 
 const MARTLET_PNG_URL: &str = "https://cdn.discordapp.com/attachments/1385507660668993648/1390416756413304902/VeeM0cK.png?ex=68682e03&is=6866dc83&hm=4bb37f9ce82553d8613780b29e3e7f972e43d6f15728cd0d9e9457be7ec77183&";
 
@@ -81,8 +81,8 @@ impl EventHandler for Handler {
             CreateCommandOption::new(
                 CommandOptionType::String,
                 "section",
-                "The specific section to search for, like \"1\" or \"002\".\
-                    All sections are included if omitted.",
+                "The specific section to search for, like \"002\".\
+                    Leading zeroes matter! All sections are included if omitted.",
             )
             .required(false),
             CreateCommandOption::new(
@@ -405,7 +405,7 @@ impl Handler {
             u32,
             Subject,
             CourseNumber,
-            Option<SectionNumber>,
+            Option<String>,
             bool,
             bool,
         ),
@@ -444,7 +444,7 @@ impl Handler {
                     )
                 }
                 ("section", ResolvedValue::String(val)) => {
-                    section = SectionNumber::try_from(val.to_string()).ok()
+                    section = Some(val.to_string())
                 }
                 ("allspans", ResolvedValue::Boolean(val)) => all_spans = val,
                 ("allupdates", ResolvedValue::Boolean(val)) => all_updates = val,
@@ -705,14 +705,13 @@ impl Handler {
                 }
                 ("number", ResolvedValue::String(val)) => {
                     number = Some(
-                        CourseNumber::try_from(val.to_owned())
+                        CourseNumber::try_from(val.to_string())
                             .map_err(|_| "Could not parse course number")?,
                     );
                 }
                 ("section", ResolvedValue::String(val)) => {
                     section = Some(
-                        SectionNumber::try_from(val.to_owned())
-                            .map_err(|_| "Could not parse section number")?,
+                        val.to_string(),
                     )
                 }
                 ("allspans", ResolvedValue::Boolean(val)) => {

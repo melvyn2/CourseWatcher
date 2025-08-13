@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS sections
     subject      TEXT    NOT NULL COLLATE NOCASE CHECK (length(subject) = 4),
     number       ANY     NOT NULL COLLATE NOCASE CHECK (typeof(number) = 'text' OR typeof(number) = 'integer'),
     span         TEXT    NOT NULL COLLATE NOCASE CHECK (length(span) = 0 OR (length(span) = 2 AND typeof(number) = 'integer')),
-    section      ANY     NOT NULL COLLATE NOCASE CHECK (typeof(number) = 'text' OR typeof(number) = 'integer'),
+    section      TEXT    NOT NULL COLLATE NOCASE CHECK (length(section) != 0),
 
     "select"     INTEGER NOT NULL,
     sec_type     TEXT    NOT NULL,

@@ -6,7 +6,7 @@ use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSqlOutput, Type, V
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Row, ToSql, Transaction, named_params};
 
 use crate::minerva::parser::{
-    CourseNumber, Days, Milliunits, SectionData, SectionNumber, Select, Status, Subject,
+    CourseNumber, Days, Milliunits, SectionData, Select, Status, Subject,
 };
 use chrono::{DateTime, Utc};
 use rusqlite::config::DbConfig;
@@ -182,27 +182,6 @@ impl CourseNumber {
             (_, false) => ValueRef::Text(b""),
             (_, true) => ValueRef::Null,
         })
-    }
-}
-
-impl FromSql for SectionNumber {
-    fn column_result(value: ValueRef) -> FromSqlResult<Self> {
-        match value {
-            ValueRef::Integer(n) => Ok(Self::Plain(n as u16)),
-            ValueRef::Text(t) => str::from_utf8(t)
-                .map(|s| Self::Other(s.to_string()))
-                .map_err(|e| FromSqlError::Other(Box::new(e))),
-            _ => Err(FromSqlError::InvalidType),
-        }
-    }
-}
-
-impl ToSql for SectionNumber {
-    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
-        match self {
-            Self::Plain(i) => Ok(ToSqlOutput::Owned(Value::Integer(*i as i64))),
-            Self::Other(i) => Ok(ToSqlOutput::Owned(Value::Text(i.clone()))),
-        }
     }
 }
 
@@ -397,7 +376,7 @@ pub fn demote_latest_by_number(
     term: u32,
     subject: Subject,
     number: CourseNumber,
-    section: SectionNumber,
+    section: String,
 ) -> Result<bool, rusqlite::Error> {
     trx.prepare_cached(
         "UPDATE sections INDEXED BY latest_sections_crn SET latest = 0
@@ -487,7 +466,7 @@ fn section_description_from_row(row: &Row) -> Result<String, rusqlite::Error> {
         "{} {}-{}: {} ({}: {}){}",
         row.get::<_, Subject>(0)?,
         CourseNumber::from_row_indices(row, 1, 2)?,
-        row.get::<_, SectionNumber>(3)?,
+        row.get_ref(3)?.as_str()?,
         row.get_ref(4)?.as_str()?,
         row.get_ref(5)?.as_str()?,
         row.get::<_, u32>(6)?,
@@ -506,7 +485,7 @@ pub fn lookup_latest_sections_with_term_name(
     crn: Option<u32>,
     subject: Option<Subject>,
     number: Option<CourseNumber>,
-    section: Option<SectionNumber>,
+    section: Option<String>,
     limit: usize,
     all_spans: bool,
 ) -> Result<Vec<(SectionRecord, String)>, rusqlite::Error> {
@@ -644,7 +623,7 @@ pub fn subscribe_channel_to_section_by_subj_number(
     term: u32,
     subject: Subject,
     number: CourseNumber,
-    section: Option<SectionNumber>,
+    section: Option<String>,
     all_spans: bool,
     all_updates: bool,
 ) -> Result<usize, rusqlite::Error> {
@@ -674,7 +653,7 @@ pub fn unsubscribe_channel_to_section_by_subj_number(
     term: u32,
     subject: Subject,
     number: CourseNumber,
-    section: Option<SectionNumber>,
+    section: Option<String>,
     all_spans: bool,
 ) -> Result<usize, rusqlite::Error> {
     let num_sql = number.number_tosql();
