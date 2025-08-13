@@ -81,8 +81,8 @@ impl EventHandler for Handler {
             CreateCommandOption::new(
                 CommandOptionType::String,
                 "section",
-                "The specific section to search for, like \"002\".\
-                    Leading zeroes matter! All sections are included if omitted.",
+                "The specific section to search for, like \"002\". Leading 0s matter! \
+                 All are included if omitted.",
             )
             .required(false),
             CreateCommandOption::new(
