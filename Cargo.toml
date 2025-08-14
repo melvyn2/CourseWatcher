@@ -9,16 +9,16 @@ license = "AGPL-3"
 log = "0.4"
 thiserror = "2.0"
 scraper = "0.23"
-reqwest  = { version = "0.12", features = ["rustls-tls", "cookies", "http2", "system-proxy","blocking"], default-features = false }
+reqwest  = { version = "0.12", features = ["native-tls", "cookies", "blocking"], default-features = false }
 roxmltree = "0.20"
 anyhow = "1.0"
 
 ## Database and entrypoint
-chrono = { version = "0.4" }
-rusqlite = { version = "0.37.0", features = ["bundled"] }
+chrono = "0.4"
+rusqlite = "0.37.0"
 env_logger = "0.11"
 
 ## For discord bot side
 tokio = { version = "1.45", features = ["rt-multi-thread"] }
 async-trait = "0.1"
-serenity = "0.12"
+serenity = { version = "0.12", default-features = false, features = ["default_native_tls"] }
