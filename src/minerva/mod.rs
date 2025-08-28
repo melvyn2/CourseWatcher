@@ -3,6 +3,7 @@ use std::fmt::Debug;
 use std::num::ParseIntError;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 use thiserror::Error;
 
 use anyhow::Context;
@@ -32,6 +33,7 @@ pub enum MinervaScraperError {
 
 pub fn new_client() -> Result<Client, anyhow::Error> {
     Ok(ClientBuilder::new()
+        .timeout(Some(Duration::from_secs(60)))
         .https_only(true)
         .cookie_store(true)
         .user_agent(format!(
