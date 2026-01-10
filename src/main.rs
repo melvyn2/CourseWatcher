@@ -1,4 +1,4 @@
-#![feature(string_deref_patterns)]
+#![feature(deref_patterns)]
 #![feature(if_let_guard)]
 #![feature(option_zip)]
 
@@ -121,6 +121,12 @@ fn insert_sections_for_term(
     let trx = conn.transaction()?;
     let mut ctr = 0;
     for sec in sections {
+        // Skip 'Midterm Exam' entries because they break the section-number uniqueness constraint
+        // TODO should find a way to preserve these entries
+        if sec.sec_type == "Midterm Exam" {
+            continue;
+        }
+
         let prev = latest_section_from_term_crn(&trx, term, sec.crn)?;
         let next = SectionRecord {
             term,
