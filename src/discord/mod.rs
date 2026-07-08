@@ -400,17 +400,7 @@ impl Handler {
     async fn get_term_subj_course_sec_args(
         &self,
         options: Vec<ResolvedOption<'_>>,
-    ) -> Result<
-        (
-            u32,
-            Subject,
-            CourseNumber,
-            Option<String>,
-            bool,
-            bool,
-        ),
-        &'static str,
-    > {
+    ) -> Result<(u32, Subject, CourseNumber, Option<String>, bool, bool), &'static str> {
         let mut term = None;
         let mut subj = None;
         let mut course = None;
@@ -443,9 +433,7 @@ impl Handler {
                             .map_err(|_| "Course number cannot be empty")?,
                     )
                 }
-                ("section", ResolvedValue::String(val)) => {
-                    section = Some(val.to_string())
-                }
+                ("section", ResolvedValue::String(val)) => section = Some(val.to_string()),
                 ("allspans", ResolvedValue::Boolean(val)) => all_spans = val,
                 ("allupdates", ResolvedValue::Boolean(val)) => all_updates = val,
                 (o, v) => {
@@ -709,11 +697,7 @@ impl Handler {
                             .map_err(|_| "Could not parse course number")?,
                     );
                 }
-                ("section", ResolvedValue::String(val)) => {
-                    section = Some(
-                        val.to_string(),
-                    )
-                }
+                ("section", ResolvedValue::String(val)) => section = Some(val.to_string()),
                 ("allspans", ResolvedValue::Boolean(val)) => {
                     all_spans = val;
                 }

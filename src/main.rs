@@ -1,5 +1,4 @@
 #![feature(deref_patterns)]
-#![feature(if_let_guard)]
 #![feature(option_zip)]
 
 use std::collections::HashMap;
@@ -63,16 +62,38 @@ fn process_section_update(
             next.inner.number.clone(),
             next.inner.section.clone(),
         )?;
-        insert_section(trx, &next, true).with_context(|| {
-            format!(
-                "Could not insert {} {}-{} ({}: {})",
-                next.inner.subject,
-                next.inner.number,
-                next.inner.section,
-                next.term,
-                next.inner.crn
-            )
-        })?;
+
+        insert_section(trx, &next, true)
+            .or_else(|e| match e {
+                rusqlite::Error::SqliteFailure(
+                    rusqlite::ffi::Error {
+                        extended_code: rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE,
+                        ..
+                    },
+                    _,
+                ) => {
+                    log::error!(
+                        "Skipping insert for non-unique section {} {}-{} ({}: {})",
+                        next.inner.subject,
+                        next.inner.number,
+                        next.inner.section,
+                        next.term,
+                        next.inner.crn
+                    );
+                    Ok(())
+                }
+                e => Err(e),
+            })
+            .with_context(|| {
+                format!(
+                    "Could not insert {} {}-{} ({}: {})",
+                    next.inner.subject,
+                    next.inner.number,
+                    next.inner.section,
+                    next.term,
+                    next.inner.crn
+                )
+            })?;
 
         let channels = subscriptions_to_section(trx, next.term, next.inner.crn)?;
         // We do the real filtering on the listener thread, but because minerva fetches
@@ -121,12 +142,6 @@ fn insert_sections_for_term(
     let trx = conn.transaction()?;
     let mut ctr = 0;
     for sec in sections {
-        // Skip 'Midterm Exam' entries because they break the section-number uniqueness constraint
-        // TODO should find a way to preserve these entries
-        if sec.sec_type == "Midterm Exam" {
-            continue;
-        }
-
         let prev = latest_section_from_term_crn(&trx, term, sec.crn)?;
         let next = SectionRecord {
             term,
