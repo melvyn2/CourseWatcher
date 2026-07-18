@@ -31,9 +31,9 @@ pub enum MinervaScraperError {
     ParseError(String),
 }
 
-pub fn new_client() -> Result<Client, anyhow::Error> {
+pub fn new_client(fetch_timeout: Duration) -> Result<Client, anyhow::Error> {
     Ok(ClientBuilder::new()
-        .timeout(Some(Duration::from_secs(60)))
+        .timeout(Some(fetch_timeout))
         .https_only(true)
         .cookie_store(true)
         .user_agent(format!(

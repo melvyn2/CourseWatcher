@@ -287,6 +287,12 @@ fn main() {
         .ok()
         .and_then(|v| v.parse::<u32>().ok())
         .unwrap_or(0);
+    let fetch_timeout = Duration::from_secs(
+        std::env::var("CW_FETCH_TIMEOUT_SEC")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(90),
+    );
 
     let (mut conn, db_path) = open_db().unwrap();
 
@@ -294,7 +300,7 @@ fn main() {
     log::info!("Using {cycle_sec} sec cycle delay");
     log::info!("Full minerva fetches every {full_fetch_cycles} cycles");
 
-    let cl = new_client().unwrap();
+    let cl = new_client(fetch_timeout).unwrap();
     login(&cl, &uid, &pin).unwrap();
 
     let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
