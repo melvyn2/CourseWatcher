@@ -193,15 +193,6 @@ pub fn get_subj_fac_codes_for_term(
         term
     );
 
-    if subj_ids.len() == 0 {
-        static FILE_COUNT: AtomicUsize = AtomicUsize::new(0);
-        std::fs::write(
-            format!("dump{}.html", FILE_COUNT.fetch_add(1, Ordering::SeqCst)),
-            text,
-        )
-        .unwrap();
-    }
-
     Ok((subj_ids, fac_ids))
 }
 
